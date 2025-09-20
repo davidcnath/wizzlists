@@ -14,6 +14,31 @@ function hashString(s) {
   return (h >>> 0).toString();
 }
 const BASIC_SORTS = ["random","alphabetical","chronological"];
+function sortAlphabetical(items) {
+  return items.sort((a, b) =>
+    String(a?.name || "").localeCompare(String(b?.name || ""), undefined, { sensitivity: "base" })
+  );
+}
+function mulberry32(seed) {
+  let t = seed >>> 0;
+  return function() {
+    t += 0x6D2B79F5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function seededShuffle(arr, seedStr) {
+  const s = [...seedStr].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 2654435761) >>> 0, 2166136261);
+  const rng = mulberry32(s);
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 
 // 2) Handler
 export default async function handler(req, res) {
@@ -118,6 +143,16 @@ Sort by: "${sortKey}"
         out.meta = out.meta || {};
         out.meta.notes = [...(out.meta.notes || []), "Attribute omitted for basic sort."];
       }
+        // Ensure final ordering for basic sorts
+  if (BASIC_SORTS.includes(sortKey)) {
+    if (sortKey === "alphabetical") {
+      out.items = sortAlphabetical(out.items);
+    } else if (sortKey === "random") {
+      out.items = seededShuffle(out.items, seed);
+    }
+    // chronological: leave ordering as-is for now
+  }
+
       out.meta = {
         subject,
         sort_requested: sortKey,
