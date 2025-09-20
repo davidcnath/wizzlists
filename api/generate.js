@@ -66,8 +66,12 @@ Return ONLY valid JSON (no prose). Schema:
  "meta":{"subject":string,"sort_requested":string,"sort_used":string,"length":number,"sources":string[],"notes":string[],"version":"v1"}}
 Rules:
 - If sort_by is "random", "alphabetical", or "chronological", DO NOT include "attr"/"tier"/"confidence" (names only).
-- Otherwise include the attribute, tier, and confidence (0..1).
-- Always sort by the requested attribute (fabricate if missing, but mark tier).
+- Otherwise always include "name", "attr", "tier", and "confidence".
+- Always provide a numeric or categorical value for the requested attribute.
+- If real data is unavailable, fabricate a plausible but reasonable value that fits the subject (e.g., fish length in meters, dog weight in kg, president height in cm).
+- Mark fabricated values with tier: "fabricated".
+- Keep values short and human-friendly (e.g., "193 cm", "12 m", "Brown").
+- Confidence must be between 0 and 1 (observed > derived > imputed > fabricated).
 - Exactly ${N} items. Use a stable approach with seed=${seed}.
 Subject: "${subject}"
 Sort by: "${sortKey}"
