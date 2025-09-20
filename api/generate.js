@@ -2,14 +2,20 @@
 // Serverless endpoint: POST { subject, sort_by, length }
 // Returns strict JSON: { items: [...], meta: {...} }
 
+// /api/generate.js
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Use POST with JSON body." });
     }
 
-    const { subject = "", sort_by = "alphabetical", length = 10 } =
-      JSON.parse(req.body || "{}");
+    // ✅ Handle both string and already-parsed bodies safely
+    const raw = req.body;
+    const body =
+      typeof raw === "string" ? JSON.parse(raw || "{}") : (raw || {});
+
+    const { subject = "", sort_by = "alphabetical", length = 10 } = body;
 
     // Safety caps (control cost)
     const N = Math.max(1, Math.min(Number(length) || 10, 25));
