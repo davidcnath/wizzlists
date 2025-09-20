@@ -2,11 +2,63 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>WizzLists</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; }
+    label { display:block; margin: 12px 0 6px; }
+    input, button { padding: 10px; font-size: 16px; width: 100%; max-width: 480px; }
+    ol { padding-left: 20px; }
+    .row { margin: 8px 0; }
+    .meta { margin-top: 12px; color: #555; font-size: 14px; }
+  </style>
 </head>
 <body>
-  <h1>Hello, WizzLists! 🎩✨</h1>
-  <p>This is the very first version of your site.</p>
+  <h1>WizzLists ✨</h1>
+  <p>Try: <em>US presidents</em> sorted by <em>height</em>, length <em>10</em>.</p>
+
+  <div class="row">
+    <label>Subject</label>
+    <input id="subject" value="US presidents" placeholder="e.g., dog breeds, countries, GoT characters"/>
+  </div>
+
+  <div class="row">
+    <label>Sort by</label>
+    <input id="sortBy" value="height" placeholder="e.g., height, eye colour, alphabetical, random"/>
+  </div>
+
+  <div class="row">
+    <label>Length</label>
+    <input id="length" type="number" value="10" min="1" max="25"/>
+  </div>
+
+  <div class="row">
+    <button id="go">Generate</button>
+  </div>
+
+  <div id="out"></div>
+
+  <script>
+    const $ = (id)=>document.getElementById(id);
+    $("go").onclick = async () => {
+      const body = {
+        subject: $("subject").value.trim(),
+        sort_by: $("sortBy").value.trim(),
+        length: Number($("length").value || 10)
+      };
+      $("out").innerHTML = "Loading…";
+      try {
+        const r = await fetch("/api/generate", { method: "POST", body: JSON.stringify(body) });
+        const data = await r.json();
+        if (!data.items) throw new Error("No items");
+        $("out").innerHTML = `
+          <ol>${data.items.map(i=>`<li><strong>${i.name}</strong>${i.attr?` — <small>${i.attr}</small>`:""}</li>`).join("")}</ol>
+          <div class="meta">Sorted by: ${data.meta.sort_used} • Length: ${data.meta.length}</div>
+        `;
+      } catch (e) {
+        $("out").textContent = "Something went wrong.";
+      }
+    };
+  </script>
 </body>
 </html>
