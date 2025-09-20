@@ -157,6 +157,20 @@ Sort by: "${sortKey}"
     // chronological: leave ordering as-is for now
   }
 
+      // If it's a custom attribute, try to sort numerically if possible
+if (!BASIC_SORTS.includes(sortKey)) {
+  const parseNum = (val) => {
+    if (!val) return NaN;
+    const m = String(val).match(/[\d\.]+/);
+    return m ? parseFloat(m[0]) : NaN;
+  };
+  const nums = out.items.map(i => parseNum(i.attr));
+  const valid = nums.filter(n => !isNaN(n));
+  if (valid.length > 0) {
+    out.items.sort((a, b) => parseNum(b.attr) - parseNum(a.attr)); // big → small
+  }
+}
+      
       out.meta = {
         subject,
         sort_requested: sortKey,
