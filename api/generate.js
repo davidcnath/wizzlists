@@ -4,6 +4,14 @@
 
 // /api/generate.js
 
+function normalizeSortKey(key = "") {
+  const s = String(key).trim().toLowerCase();
+  if (/^(random|randomize|shuffle|mix|rnd)$/i.test(s)) return "random";
+  if (/^(alphabetical|alpha|a\-z|az|name)$/i.test(s)) return "alphabetical";
+  if (/^(chronological|chrono|date|time|year)$/i.test(s)) return "chronological";
+  return s || "alphabetical";
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
@@ -15,13 +23,20 @@ export default async function handler(req, res) {
     const body =
       typeof raw === "string" ? JSON.parse(raw || "{}") : (raw || {});
 
-    const { subject = "", sort_by = "alphabetical", length = 10 } = body;
+    // Safely parse request body
+const raw = req.body;
+const body = typeof raw === "string" ? JSON.parse(raw || "{}") : (raw || {});
+
+// Extract fields + normalize sort key
+const { subject = "", sort_by = "alphabetical", length = 10 } = body;
+const sortKey = normalizeSortKey(sort_by);
+
 
     // Safety caps (control cost)
     const N = Math.max(1, Math.min(Number(length) || 10, 25));
 
     // Deterministic seed so same prompt → same list (helps caching later)
-    const seed = hashString(`${subject}|${sort_by}|${N}|v1`);
+    const seed = hashString(`${subject}|${sortKey}|${N}|v1`);
 
     const prompt = `
 Return ONLY valid JSON matching this schema (no backticks, no prose):
@@ -36,7 +51,7 @@ Rules:
 - Exactly ${N} items.
 - Use a stable approach given seed=${seed}.
 Subject: "${subject}"
-Sort by: "${sort_by}"
+Sort by: "${sortKey}"
 `;
 
     // Call OpenAI
