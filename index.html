@@ -24,17 +24,14 @@
 
   <div class="row">
   <label>Sort by</label>
-
-  <!-- Mode selector -->
   <div style="display:flex; gap:12px; align-items:center; margin:6px 0 10px;">
     <label><input type="radio" name="sortmode" value="custom" checked> Custom</label>
     <label><input type="radio" name="sortmode" value="alphabetical"> Alphabetical</label>
     <label><input type="radio" name="sortmode" value="random"> Random</label>
   </div>
-
-  <!-- Custom sort text -->
   <input id="sortBy" value="height" placeholder="e.g., height, eye colour, chronological" />
 </div>
+
 
   <div class="row">
     <label>List Length (Maximum 25)</label>
@@ -48,29 +45,31 @@
   <div id="out"></div>
 
   <script>
-      const sortByInput = document.getElementById("sortBy");
-  const modes = Array.from(document.querySelectorAll('input[name="sortmode"]'));
-  modes.forEach(r => r.addEventListener("change", () => {
-    const v = document.querySelector('input[name="sortmode"]:checked').value;
-    const isCustom = v === "custom";
-    sortByInput.disabled = !isCustom;
-    sortByInput.style.opacity = isCustom ? "1" : "0.6";
-  }));
+const sortByInput = document.getElementById("sortBy");
+const modes = Array.from(document.querySelectorAll('input[name="sortmode"]'));
 
-  // When sending the request, pick the right sort value
-  function currentSortBy() {
-    const v = document.querySelector('input[name="sortmode"]:checked').value;
-    if (v === "alphabetical" || v === "random") return v;
-    return sortByInput.value.trim();
-  }
+function updateSortUI() {
+  const v = document.querySelector('input[name="sortmode"]:checked').value;
+  const isCustom = v === "custom";
+  sortByInput.disabled = !isCustom;
+  sortByInput.style.opacity = isCustom ? "1" : "0.6";
+}
+modes.forEach(r => r.addEventListener("change", updateSortUI));
+updateSortUI(); // run on load
+
+function currentSortBy() {
+  const v = document.querySelector('input[name="sortmode"]:checked').value;
+  if (v === "alphabetical" || v === "random") return v;
+  return sortByInput.value.trim();
+}
     
     const $ = (id)=>document.getElementById(id);
     $("go").onclick = async () => {
-      const body = {
-        subject: $("subject").value.trim(),
-        sort_by: $("sortBy").value.trim(),
-        length: Number($("length").value || 10)
-      };
+    const body = {
+  subject: document.getElementById("subject").value.trim(),
+  sort_by: currentSortBy(),   // <-- this is the fix
+  length: Number(document.getElementById("length").value || 10)
+};
       $("out").innerHTML = "Loading…";
       try {
         const r = await fetch("/api/generate", { method: "POST", body: JSON.stringify(body) });
