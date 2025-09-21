@@ -56,17 +56,143 @@ async function fetchSummary(title) {
   };
 }
 
-// NOTE: This is a safe, running placeholder (stub). I can swap in the full extractor next.
+// --- Wikidata subject/property mapping --- //
+function mapSubjectAndProperty(subjectRaw, sortKeyRaw) {
+  const subject = String(subjectRaw || "").toLowerCase();
+  const sortKey = String(sortKeyRaw || "").toLowerCase();
+
+  // Common classes (QIDs) and default properties (PIDs)
+  // You can extend this table over time.
+  const C = {
+    mountains: { qid: "Q8502", defaultPid: "P2044" },      // elevation above sea level
+    mountain:  { qid: "Q8502", defaultPid: "P2044" },
+    lakes:     { qid: "Q23397", defaultPid: null },        // decide by sort key (volume/area)
+    lake:      { qid: "Q23397", defaultPid: null },
+    cities:    { qid: "Q515",  defaultPid: "P1082" },      // population
+    city:      { qid: "Q515",  defaultPid: "P1082" },
+    countries: { qid: "Q6256", defaultPid: "P1082" },      // population
+    country:   { qid: "Q6256", defaultPid: "P1082" },
+  };
+
+  const PID = {
+    height: "P2048",        // generic height
+    elevation: "P2044",     // elevation above sea level
+    population: "P1082",
+    area: "P2046",
+    volume: "P2047",        // water volume
+  };
+
+  // Pick class by subject keyword
+  let key = Object.keys(C).find(k => subject.includes(k));
+  const clazz = key ? C[key] : null;
+
+  // Pick property by sort key (or a sensible default for the class)
+  let pid = PID[sortKey] || clazz?.defaultPid || null;
+
+  // Special-case: lakes + “height” really means elevation, and lakes + “volume” is P2047
+  if (clazz?.qid === "Q23397") {
+    if (sortKey.includes("volume")) pid = "P2047";
+    else if (sortKey.includes("area")) pid = "P2046";
+  }
+
+  // Special-case: mountains + “height” → use elevation (P2044) for usefulness
+  if (clazz?.qid === "Q8502" && (sortKey === "height" || sortKey === "elevation")) {
+    pid = "P2044";
+  }
+
+  return { classQid: clazz?.qid || null, pid };
+}
+
+// --- Build a SPARQL that returns label, numeric value, and English Wikipedia URL --- //
+function buildSparql({ classQid, pid, limit }) {
+  // Only return items that have the property ?val
+  // Pull the enwiki article via the schema:about trick
+  return `
+SELECT ?item ?itemLabel ?article ?val WHERE {
+  ?item wdt:P31/wdt:P279* wd:${classQid} .
+  ?item wdt:${pid} ?val .
+  OPTIONAL {
+    ?article schema:about ?item ;
+             schema:inLanguage "en" ;
+             schema:isPartOf <https://en.wikipedia.org/> .
+  }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+}
+ORDER BY DESC(?val)
+LIMIT ${limit}
+`.trim();
+}
+
+// --- Fetch from Wikidata Query Service --- //
+async function runSparql(query) {
+  const res = await fetch("https://query.wikidata.org/sparql", {
+    method: "POST",
+    headers: {
+      "Accept": "application/sparql-results+json",
+      "Content-Type": "application/sparql-query",
+      "User-Agent": "WizzLists/1.0 (https://wizzlists.com; contact@yourmail.com)"
+    },
+    body: query
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+// --- Real implementation: Wikipedia/Wikidata first --- //
 async function generateWithWikipediaFirst({ subject, length, sortKey }) {
-  const listTitle = `List of ${subject}`;
-  const summary = await fetchSummary(listTitle);
-  if (!summary) {
+  const { classQid, pid } = mapSubjectAndProperty(subject, sortKey);
+
+  // If we can’t map the subject/property, signal GPT fallback
+  if (!classQid || !pid) {
     return { items: [], needGPT: [], filledBy: "gpt_fallback_needed" };
   }
-  // Return one representative item so the pipeline works end-to-end.
-  const items = [{ name: summary.title, description: summary.description, url: summary.url }];
-  return { items, needGPT: [], filledBy: "wikipedia_first" };
+
+  // Ask for a little more than needed (helps if some rows lack enwiki)
+  const limit = Math.min(Math.max(length * 2, length + 3), 50);
+  const query = buildSparql({ classQid, pid, limit });
+
+  const data = await runSparql(query);
+  if (!data?.results?.bindings?.length) {
+    return { items: [], needGPT: [], filledBy: "gpt_fallback_needed" };
+  }
+
+  // Normalize rows → items your frontend already understands
+  // We’ll render numeric values as human-friendly (meters, km², etc.) when obvious.
+  const formatVal = (num, pid) => {
+    const v = Number(num);
+    if (!Number.isFinite(v)) return null;
+    if (pid === "P2044" || pid === "P2048") return `${Math.round(v)} m`;    // elevation/height
+    if (pid === "P2046") return `${Math.round(v)} m²`;                      // area (raw unit varies; refine later)
+    if (pid === "P1082") return `${Math.round(v).toLocaleString()}`;        // population
+    if (pid === "P2047") return `${Math.round(v)} m³`;                      // volume (often m³; sometimes km³ — refine later)
+    return String(v);
+  };
+
+  const itemsRaw = data.results.bindings.map(b => {
+    const name = b.itemLabel?.value || "";
+    const url = b.article?.value || null;
+    const val = b.val?.value ?? null;
+
+    return {
+      name,
+      attr: formatVal(val, pid), // your existing code sorts on .attr for custom sorts
+      url
+    };
+  });
+
+  // Keep those that have a name; take top “length”
+  let items = itemsRaw.filter(x => x.name).slice(0, length);
+
+  // If we’re missing some numeric attrs, mark for GPT patch (rare here, but keep the contract)
+  const needGPT = items.filter(i => !i.attr).map(i => ({ name: i.name }));
+
+  return {
+    items,
+    needGPT,
+    filledBy: "wikipedia_first"
+  };
 }
+
 
 // 3) GPT helpers
 async function generateViaAI({ subject, sortKey, N, seed }) {
