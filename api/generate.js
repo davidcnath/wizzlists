@@ -1,4 +1,4 @@
-// Vercel Serverless Function: /api/generate  (GET, SSE)
+// Vercel Serverless Function: /api/generate  (GET, SSE) 
 // Query: ?topic=&limit=10&mode=fast|accurate
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).end('Method Not Allowed');
