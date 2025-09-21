@@ -1,4 +1,5 @@
-// /api/health (GET)
-// OUTPUT: { ok: true, mock: boolean }
-// TODO: simple ping + indicates MOCK_MODE
-
+export default function registerHealth(app) {
+  app.get("/api/health", (_req, res) => {
+    res.json({ ok: true, mock: true });
+  });
+}
