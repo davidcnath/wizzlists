@@ -1,2 +1,53 @@
-<!-- WizzLists MVP UI (placeholder) -->
-<!-- TODO: replace with real markup. This file will load /assets/js/generator.js and talk to /api/* -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>WizzLists (MVP)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/assets/css/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>WizzLists ✨</h1>
+
+    <section id="prompt">
+      <form id="topic-form">
+        <label>What do you want a list of?</label>
+        <input id="topic-input" placeholder="e.g., European mountains" required />
+        <div class="row">
+          <button type="submit">Make my list</button>
+          <select id="mode">
+            <option value="fast" selected>Fast</option>
+            <option value="accurate">Accurate</option>
+          </select>
+        </div>
+      </form>
+    </section>
+
+    <section id="controls" class="hidden">
+      <button id="restart">Restart</button>
+      <button id="more">More (up to 20)</button>
+    </section>
+
+    <ol id="list"></ol>
+
+    <section id="sort-area" class="hidden">
+      <h3>How do you want to sort this?</h3>
+      <div id="chips"></div>
+      <form id="custom-sort-form" class="row">
+        <input id="custom-sort" placeholder="Enter a custom criterion..." />
+        <button>Sort</button>
+      </form>
+    </section>
+
+    <div id="confidence-wrap" class="hidden">
+      <div class="conf-labels"><span>hallucinated</span><span>verified</span></div>
+      <div class="conf-bar">
+        <div id="confidence" style="width:0%"></div>
+      </div>
+    </div>
+  </main>
+
+  <script type="module" src="/assets/js/generator.js"></script>
+</body>
+</html>
