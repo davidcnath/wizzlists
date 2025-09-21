@@ -1,0 +1,13 @@
+{
+  "name": "wizzlists",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/start-server.mjs",
+    "start": "node scripts/start-server.mjs",
+    "test": "echo \"(tests coming soon)\" && exit 0"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
