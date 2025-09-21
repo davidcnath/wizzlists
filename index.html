@@ -45,44 +45,101 @@
   <div id="out"></div>
 
   <script>
-const sortByInput = document.getElementById("sortBy");
-const modes = Array.from(document.querySelectorAll('input[name="sortmode"]'));
+  const $ = (id) => document.getElementById(id);
+  const sortByInput = $("sortBy");
+  const modes = Array.from(document.querySelectorAll('input[name="sortmode"]'));
 
-function updateSortUI() {
-  const v = document.querySelector('input[name="sortmode"]:checked').value;
-  const isCustom = v === "custom";
-  sortByInput.disabled = !isCustom;
-  sortByInput.style.opacity = isCustom ? "1" : "0.6";
-}
-modes.forEach(r => r.addEventListener("change", updateSortUI));
-updateSortUI(); // run on load
+  function updateSortUI() {
+    const v = document.querySelector('input[name="sortmode"]:checked').value;
+    const isCustom = v === "custom";
+    sortByInput.disabled = !isCustom;
+    sortByInput.style.opacity = isCustom ? "1" : "0.6";
+  }
+  modes.forEach(r => r.addEventListener("change", updateSortUI));
+  updateSortUI();
 
-function currentSortBy() {
-  const v = document.querySelector('input[name="sortmode"]:checked').value;
-  if (v === "alphabetical" || v === "random") return v;
-  return sortByInput.value.trim();
-}
-    
-    const $ = (id)=>document.getElementById(id);
-    $("go").onclick = async () => {
-    const body = {
-  subject: document.getElementById("subject").value.trim(),
-  sort_by: currentSortBy(),   // <-- this is the fix
-  length: Number(document.getElementById("length").value || 10)
-};
-      $("out").innerHTML = "Loading…";
-      try {
-        const r = await fetch("/api/generate", { method: "POST", body: JSON.stringify(body) });
-        const data = await r.json();
-        if (!data.items) throw new Error("No items");
-        $("out").innerHTML = `
-          <ol>${data.items.map(i=>`<li><strong>${i.name}</strong>${i.attr?` — <small>${i.attr}</small>`:""}</li>`).join("")}</ol>
-          <div class="meta">Sorted by: ${data.meta.sort_used} • Length: ${data.meta.length}</div>
-        `;
-      } catch (e) {
-        $("out").textContent = "Something went wrong.";
+  function currentSortBy() {
+    const v = document.querySelector('input[name="sortmode"]:checked').value;
+    if (v === "alphabetical" || v === "random") return v;
+    return sortByInput.value.trim();
+  }
+
+  function clampLength(n) {
+    const x = Math.trunc(Number(n) || 10);
+    return Math.max(1, Math.min(x, 25));
+  }
+
+  function renderOutput(data) {
+    const isBasic = ["alphabetical","random","chronological"].includes(String(data?.meta?.sort_used || "").toLowerCase());
+    const itemsHtml = (data.items || []).map(i => {
+      const name = i?.name ?? "";
+      let extra = "";
+      if (!isBasic) {
+        const parts = [];
+        if (i?.attr) parts.push(i.attr);
+        if (i?.tier) parts.push(`tier: ${i.tier}`);
+        if (typeof i?.confidence === "number") parts.push(`conf: ${i.confidence.toFixed(2)}`);
+        if (parts.length) extra = ` — <small>${parts.join(" • ")}</small>`;
       }
-    };
-  </script>
+      return `<li><strong>${name}</strong>${extra}</li>`;
+    }).join("");
+
+    const sources = (data?.meta?.sources || []).map(s => `<li>${s}</li>`).join("");
+    const notes = (data?.meta?.notes || []).map(n => `<li>${n}</li>`).join("");
+
+    $("out").innerHTML = `
+      <ol>${itemsHtml}</ol>
+      <div class="meta">Sorted by: ${data.meta.sort_used} • Length: ${data.meta.length}</div>
+      ${(sources || notes) ? `
+        <div class="meta">
+          ${sources ? `<div><strong>Sources</strong><ul>${sources}</ul></div>` : ""}
+          ${notes ? `<div><strong>Notes</strong><ul>${notes}</ul></div>` : ""}
+        </div>` : ""}
+    `;
+  }
+
+  async function generate() {
+    const subject = $("subject").value.trim();
+    const sort_by = currentSortBy();
+    const length = clampLength($("length").value);
+
+    if (!subject) {
+      $("out").textContent = "Please enter a subject.";
+      return;
+    }
+
+    const body = { subject, sort_by, length };
+    $("out").textContent = "Loading…";
+    $("go").disabled = true;
+
+    try {
+      const r = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (!r.ok) {
+        const txt = await r.text().catch(() => "");
+        throw new Error(`HTTP ${r.status} ${txt.slice(0,120)}`);
+      }
+      const data = await r.json();
+      if (!data?.items) throw new Error("Invalid response shape");
+      renderOutput(data);
+    } catch (e) {
+      console.error(e);
+      $("out").textContent = "Something went wrong.";
+    } finally {
+      $("go").disabled = false;
+    }
+  }
+
+  $("go").onclick = generate;
+  // Press Enter in any input to run
+  ["subject","sortBy","length"].forEach(id => {
+    $(id).addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") generate();
+    });
+  });
+</script>
 </body>
 </html>
