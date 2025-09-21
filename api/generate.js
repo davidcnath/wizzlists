@@ -1,7 +1,4 @@
-// /api/generate.js — WIKIPEDIA-FIRST VERSION
-
-// 0) Imports (only node-fetch if you’re in Node 18-)
-import fetch from "node-fetch";
+// /api/generate.js — WIKIPEDIA-FIRST VERSION (Next.js-safe: uses global fetch)
 
 // 1) Utility helpers
 function normalizeSortKey(key = "") {
@@ -42,10 +39,12 @@ function seededShuffle(arr, seedStr) {
   return a;
 }
 
-// 2) Minimal Wikipedia/Wikidata helpers
+// 2) Minimal Wikipedia helpers (safe placeholder — won’t crash if the page is missing)
 async function fetchSummary(title) {
   const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
-  const res = await fetch(url, { headers: { "User-Agent": "WizzLists/1.0 (https://wizzlists.com)" }});
+  const res = await fetch(url, {
+    headers: { "User-Agent": "WizzLists/1.0 (https://wizzlists.com; contact@yourmail.com)" }
+  });
   if (!res.ok) return null;
   const j = await res.json();
   return {
@@ -57,15 +56,14 @@ async function fetchSummary(title) {
   };
 }
 
-// stub: try to get a few candidates from Wikipedia (in real app use list/category parsing)
+// NOTE: This is a safe, running placeholder (stub). I can swap in the full extractor next.
 async function generateWithWikipediaFirst({ subject, length, sortKey }) {
-  // naive attempt: fetch "List of {subject}"
   const listTitle = `List of ${subject}`;
   const summary = await fetchSummary(listTitle);
   if (!summary) {
     return { items: [], needGPT: [], filledBy: "gpt_fallback_needed" };
   }
-  // fake: just return one item (the list page itself)
+  // Return one representative item so the pipeline works end-to-end.
   const items = [{ name: summary.title, description: summary.description, url: summary.url }];
   return { items, needGPT: [], filledBy: "wikipedia_first" };
 }
@@ -80,13 +78,15 @@ Rules:
 - If sort_by is "random", "alphabetical", or "chronological", DO NOT include "attr"/"tier"/"confidence" (names only).
 - Otherwise always include "name", "attr", "tier", and "confidence".
 - Always provide a numeric or categorical value for the requested attribute.
-- If real data is unavailable, fabricate a plausible but reasonable value.
+- If real data is unavailable, fabricate a plausible but reasonable value that fits the subject.
 - Mark fabricated values with tier: "fabricated".
-- Confidence must be between 0 and 1.
+- Confidence must be between 0 and 1 (observed > derived > imputed > fabricated).
 - Exactly ${N} items. Use a stable approach with seed=${seed}.
 Subject: "${subject}"
 Sort by: "${sortKey}"
   `.trim();
+
+  if (!process.env.OPENAI_API_KEY) throw new Error("NO_OPENAI_KEY");
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -105,19 +105,47 @@ Sort by: "${sortKey}"
     })
   });
 
-  if (!resp.ok) throw new Error("OPENAI_FAIL");
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => "");
+    throw new Error(`OPENAI_FAIL ${resp.status}: ${detail.slice(0, 200)}`);
+  }
   const data = await resp.json();
   const text = data?.choices?.[0]?.message?.content || "";
-  return JSON.parse(text);
+
+  // Try parse once, then self-heal if needed
+  try {
+    return JSON.parse(text);
+  } catch {
+    const fixResp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: "Return ONLY valid JSON. No explanations." },
+          { role: "user", content: `Fix to valid JSON:\n${text}` }
+        ],
+        temperature: 0.0,
+        max_tokens: 700
+      })
+    });
+    const fixData = await fixResp.json();
+    const fixed = fixData?.choices?.[0]?.message?.content || "{}";
+    return JSON.parse(fixed);
+  }
 }
 
 async function fillBlanksWithGPT(missingItems, sortKey) {
+  if (!process.env.OPENAI_API_KEY) return [];
   const prompt = `
 Fill in the missing "${sortKey}" values for these entities.
 Return JSON array: [{ "title": ..., "${sortKey}": number or null }]
 If no reliable data exists, return null.
 Entities:
-${missingItems.map(x => `- ${x.name}`).join("\n")}
+${missingItems.map(x => `- ${x.name || x.title}`).join("\n")}
   `.trim();
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -138,7 +166,11 @@ ${missingItems.map(x => `- ${x.name}`).join("\n")}
   });
   const data = await resp.json();
   const text = data?.choices?.[0]?.message?.content || "[]";
-  return JSON.parse(text);
+  try {
+    return JSON.parse(text);
+  } catch {
+    return [];
+  }
 }
 
 // 4) API Handler
@@ -147,6 +179,8 @@ export default async function handler(req, res) {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Use POST with JSON body." });
     }
+
+    // Safe body parse
     const raw = req.body;
     const body = typeof raw === "string" ? JSON.parse(raw || "{}") : (raw || {});
     const { subject = "", sort_by = "alphabetical", length = 10 } = body;
@@ -160,17 +194,27 @@ export default async function handler(req, res) {
     // --- WIKIPEDIA FIRST ---
     try {
       const wikiResult = await generateWithWikipediaFirst({ subject, length: N, sortKey });
+
       if (wikiResult.filledBy === "gpt_fallback_needed") {
-        out = await generateViaAI({ subject, sortKey, N, seed });
+        // No Wikipedia data → AI full generation (your original path)
+        try {
+          out = await generateViaAI({ subject, sortKey, N, seed });
+        } catch (e) {
+          console.error("AI path error:", e?.message || e);
+          out = null;
+        }
       } else {
+        // We have some data from Wikipedia
         let items = wikiResult.items;
-        if (wikiResult.needGPT?.length && process.env.OPENAI_API_KEY) {
+
+        if (wikiResult.needGPT?.length) {
           const patched = await fillBlanksWithGPT(wikiResult.needGPT, sortKey);
           items = items.map(item => {
-            const found = patched.find(p => p.title === item.title);
+            const found = patched.find(p => (p.title || p.name) === (item.title || item.name));
             return found ? { ...item, ...found } : item;
           });
         }
+
         out = {
           items,
           meta: {
@@ -189,31 +233,55 @@ export default async function handler(req, res) {
       out = null;
     }
 
-    // --- FALLBACK FABRICATE ---
+    // --- FALLBACK FABRICATE (never 500) ---
     if (!out || !Array.isArray(out.items)) {
       const items = Array.from({ length: N }, (_, i) => ({
         name: `${subject || "Item"} ${i + 1}`,
         ...(BASIC_SORTS.includes(sortKey) ? {} : { attr: `${sortKey} (fallback)`, tier: "fabricated", confidence: 0.2 })
       }));
-      out = { items, meta: { subject, sort_requested: sortKey, sort_used: sortKey, length: items.length, sources: [], notes: ["AI/Wiki unavailable — fallback"], version: "v1" } };
+      out = {
+        items,
+        meta: {
+          subject,
+          sort_requested: sortKey,
+          sort_used: sortKey,
+          length: items.length,
+          sources: [],
+          notes: ["AI/Wiki unavailable — fallback list"],
+          version: "v1"
+        }
+      };
     } else {
-      // normalize output & sort if needed
+      // Normalize & sort like before
       out.items = out.items.slice(0, N);
+
       if (BASIC_SORTS.includes(sortKey)) {
         out.items = out.items.map(({ attr, tier, confidence, ...rest }) => rest);
+        out.meta = out.meta || {};
         out.meta.notes = [...(out.meta.notes || []), "Attribute omitted for basic sort."];
       }
+
       if (BASIC_SORTS.includes(sortKey)) {
         if (sortKey === "alphabetical") out.items = sortAlphabetical(out.items);
         else if (sortKey === "random") out.items = seededShuffle(out.items, seed);
+        // chronological: left as-is
       } else {
         const parseNum = (val) => {
           if (!val) return NaN;
           const m = String(val).match(/[\d\.]+/);
           return m ? parseFloat(m[0]) : NaN;
         };
-        out.items.sort((a, b) => parseNum(b.attr) - parseNum(a.attr));
+        out.items.sort((a, b) => parseNum(b.attr ?? b[sortKey]) - parseNum(a.attr ?? a[sortKey]));
       }
+      out.meta = {
+        subject,
+        sort_requested: sortKey,
+        sort_used: sortKey,
+        length: out.items.length,
+        sources: Array.isArray(out?.meta?.sources) ? out.meta.sources : (out.meta?.sources ? [out.meta.sources] : []),
+        notes: Array.isArray(out?.meta?.notes) ? out.meta.notes : (out.meta?.notes ? [out.meta.notes] : []),
+        version: "v1"
+      };
     }
 
     return res.status(200).json(out);
