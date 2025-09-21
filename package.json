@@ -8,6 +8,9 @@
     "start": "node scripts/start-server.mjs",
     "test": "echo \"(tests coming soon)\" && exit 0"
   },
-  "dependencies": {},
-  "devDependencies": {}
+  "dependencies": {
+    "express": "^4.19.2",
+    "morgan": "^1.10.0",
+    "nanoid": "^5.0.7"
+  }
 }
